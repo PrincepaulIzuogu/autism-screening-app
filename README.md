@@ -33,6 +33,7 @@ The Autism Screening App is a web-based tool designed to support early detection
 ![Screenshot 2025-05-23 214717](https://github.com/user-attachments/assets/8879ebe2-0558-4b9b-8163-2241e586f15d)
 
 ***Features***
+
 **1. Emotion-Based Screening**
 Presents a sequence of seven emotional expressions:
 Happy, Cry, Surprised, Angry, Fear, Love, Neutral
