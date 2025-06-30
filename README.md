@@ -95,7 +95,7 @@ At the end of the screening, you’re redirected to /reports.
 
 Review gaze patterns, pupil size, and suggested outcome.
 
-Customize the Experience
+Customize the Experience.
 
 Go to Upload Media to add your own GIFs or MP4s for any emotion.
 
