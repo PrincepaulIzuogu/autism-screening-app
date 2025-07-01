@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import AppLayout from '../components/AppLayout';
 import { FaceMesh } from '@mediapipe/face_mesh';
 import * as cam from '@mediapipe/camera_utils';
@@ -28,9 +29,9 @@ const Screening = () => {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const socketRef = useRef<WebSocket | null>(null);
   const cameraRef = useRef<cam.Camera | null>(null);
   const faceMeshRef = useRef<FaceMesh | null>(null);
+  const screeningDataRef = useRef<any[]>([]); // store frames per stimulus
 
   const selected: Record<string, string> = JSON.parse(localStorage.getItem('selectedStimuli') || '{}');
   const moods = ['Happy', 'Cry', 'Surprised', 'Angry', 'Fear', 'Love', 'Neutral'];
@@ -53,16 +54,11 @@ const Screening = () => {
   const cleanup = () => {
     cameraRef.current?.stop();
     faceMeshRef.current?.close();
-    socketRef.current?.close();
   };
 
   useEffect(() => {
-    socketRef.current = new WebSocket('ws://localhost:8000/ws/screening');
-    socketRef.current.onopen = () => {
-      const token = localStorage.getItem('token');
-      if (token) socketRef.current?.send(JSON.stringify({ token }));
-    };
-    return () => socketRef.current?.close();
+    setCurrentStimulus(null);
+    screeningDataRef.current = [];
   }, []);
 
   useEffect(() => {
@@ -88,13 +84,26 @@ const Screening = () => {
   }, [countdown]);
 
   useEffect(() => {
-    if (phase !== 'showing') return;
-    const timer = setTimeout(() => {
-      setStimulusIndex((prev) => prev + 1);
-      setPhase('countdown');
-    }, 6000);
-    return () => clearTimeout(timer);
-  }, [phase]);
+    if (phase === 'showing') {
+      const timer = setTimeout(async () => {
+        setPhase('countdown');
+        const token = localStorage.getItem('token');
+        const payload = [...screeningDataRef.current];
+        screeningDataRef.current = [];
+
+        try {
+          await axios.post('http://localhost:8000/api/screening/batch', payload, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch (error) {
+          console.error('❌ Failed to send data for', currentStimulus?.name, error);
+        }
+
+        setStimulusIndex((prev) => prev + 1);
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [phase, currentStimulus]);
 
   useEffect(() => {
     if (phase === 'done') {
@@ -123,7 +132,7 @@ const Screening = () => {
     });
 
     faceMesh.onResults((results) => {
-      if (cancelled || !ctx || phase === 'done') return;
+      if (cancelled || !ctx || phase !== 'showing') return;
 
       ctx.save();
       ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
@@ -154,9 +163,7 @@ const Screening = () => {
           frame: canvasEl.toDataURL('image/jpeg').split(',')[1],
         };
 
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(JSON.stringify(payload));
-        }
+        screeningDataRef.current.push(payload);
       }
 
       ctx.restore();
@@ -166,7 +173,7 @@ const Screening = () => {
 
     const camera = new cam.Camera(videoEl, {
       onFrame: async () => {
-        if (!cancelled && phase !== 'done') {
+        if (!cancelled && phase === 'showing') {
           await faceMesh.send({ image: videoEl });
         }
       },
