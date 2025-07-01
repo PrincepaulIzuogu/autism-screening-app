@@ -39,7 +39,19 @@ const Reports = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        setSessions(response.data.sessions);
+        // Filter: remove 0s and duplicates per stimulus
+        const seenStimuli = new Set();
+        const filtered = response.data.sessions.filter((session) => {
+          const hasValidPupils = session.left_pupil_size > 0 && session.right_pupil_size > 0;
+          const isNewStimulus = !seenStimuli.has(session.stimulus);
+          if (hasValidPupils && isNewStimulus) {
+            seenStimuli.add(session.stimulus);
+            return true;
+          }
+          return false;
+        });
+
+        setSessions(filtered);
         setDecision(response.data.decision);
       } catch (error) {
         console.error('Failed to fetch reports', error);
