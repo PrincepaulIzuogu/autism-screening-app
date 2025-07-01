@@ -369,68 +369,42 @@ def send_reset_code_json(request: EmailRequest, db: Session = Depends(get_db)):
     return {"message": "Reset code sent."}
 
 
-@app.websocket("/ws/screening")
-async def screening_ws(websocket: WebSocket):
-    await websocket.accept()
-    db = None
+@app.post("/api/screening/batch")
+def screening_batch(
+    payloads: List[ScreeningPayload],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not payloads:
+        raise HTTPException(status_code=400, detail="No screening data provided.")
 
-    try:
-        auth_msg = await websocket.receive_json()
-        token = auth_msg.get("token")
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
+    buffer = defaultdict(list)
+    for payload in payloads:
+        image_data = base64.b64decode(payload.frame)
+        gaze, left, right = analyze_pupils(image_data)
+        buffer[payload.stimulus].append((payload.timestamp, gaze, left, right))
 
-        db = SessionLocal()
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise ValueError("User not found")
-        user_id = user.id
+    for stimulus, records in buffer.items():
+        if not records:
+            continue
+        avg_left = sum(r[2] for r in records) / len(records)
+        avg_right = sum(r[3] for r in records) / len(records)
+        common_gaze = max(set(r[1] for r in records), key=lambda g: sum(1 for x in records if x[1] == g))
+        asd_flag = "high" if avg_left < 2 and avg_right < 2 else "low"
 
-        buffer = defaultdict(list)
-        current_stimulus = None
+        db.add(ScreeningSession(
+            user_id=current_user.id,
+            timestamp=datetime.fromisoformat(records[0][0]),
+            stimulus=stimulus,
+            gaze_direction=common_gaze,
+            left_pupil_size=avg_left,
+            right_pupil_size=avg_right,
+            asd_flag=asd_flag
+        ))
 
-        while True:
-            raw = await websocket.receive_json()
-            data = ScreeningPayload(**raw)
-            image_data = base64.b64decode(data.frame)
-            gaze, left, right = analyze_pupils(image_data)
+    db.commit()
+    return {"message": "Screening data processed and saved successfully."}
 
-            if current_stimulus and data.stimulus != current_stimulus:
-                # Calculate and store average of previous stimulus
-                records = buffer[current_stimulus]
-                if records:
-                    avg_left = sum(r[1] for r in records) / len(records)
-                    avg_right = sum(r[2] for r in records) / len(records)
-                    common_gaze = max(set(r[0] for r in records), key=lambda g: sum(1 for x in records if x[0] == g))
-                    asd = "high" if avg_left < 2 and avg_right < 2 else "low"
-
-                    db.add(ScreeningSession(
-                        user_id=user_id,
-                        timestamp=datetime.fromisoformat(data.timestamp),
-                        stimulus=current_stimulus,
-                        gaze_direction=common_gaze,
-                        left_pupil_size=avg_left,
-                        right_pupil_size=avg_right,
-                        asd_flag=asd
-                    ))
-                    db.commit()
-
-                buffer.pop(current_stimulus, None)
-
-            current_stimulus = data.stimulus
-            buffer[data.stimulus].append((gaze, left, right))
-
-            await websocket.send_json({"status": "ok", "gaze": gaze, "asd": "..."})
-
-    except Exception as e:
-        print("WebSocket error:", e)
-        try:
-            await websocket.close()
-        except RuntimeError:
-            pass
-    finally:
-        if db:
-            db.close()
 
 
 
