@@ -97,6 +97,7 @@ Review gaze patterns, pupil size, and suggested outcome.
 
 Customize the Experience.
 
+
 Go to Upload Media to add your own GIFs or MP4s for any emotion.
 
 Visit Manage Stimuli to choose which media is used for screening.
